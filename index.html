@@ -15,6 +15,7 @@ h1{font-size:19px;color:var(--dourado);margin:6px 0 4px}
 .sub{font-size:13px;opacity:.8;margin-bottom:12px}
 .barra{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 button,label.btn{background:var(--petroleo);color:var(--claro);border:1px solid var(--dourado);border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit}
+button.destaque{background:var(--dourado);color:var(--petroleo2);font-weight:600}
 input[type=file]{display:none}
 input[type=range]{width:100%;accent-color:var(--dourado)}
 #passo{font-size:14px;color:var(--dourado);margin:8px 0;min-height:20px}
@@ -26,9 +27,10 @@ canvas{width:100%;border-radius:8px;display:block;background:#0A1F26;touch-actio
 </head>
 <body>
 <h1>Treino de Mira</h1>
-<div class="sub">Print no modo prática, carregue aqui e marque as bolas.</div>
+<div class="sub">Print no modo prática, cole ou carregue aqui e marque as bolas.</div>
 <div class="barra">
-  <label class="btn" for="arquivo">Carregar print</label>
+  <button id="btnColar" class="destaque">Colar print</button>
+  <label class="btn" for="arquivo">Galeria</label>
   <input type="file" id="arquivo" accept="image/*">
   <button id="btnPalpite">Palpite: ligado</button>
   <button id="btnLimpar">Recomeçar</button>
@@ -36,7 +38,7 @@ canvas{width:100%;border-radius:8px;display:block;background:#0A1F26;touch-actio
 </div>
 <div style="font-size:13px">Tamanho da bola: <span id="valR"></span> px (ajuste até o círculo cobrir a bola branca)</div>
 <input type="range" id="raio" min="4" max="80" value="14">
-<div id="passo">Carregue um print para começar.</div>
+<div id="passo">Cole ou carregue um print para começar.</div>
 <canvas id="tela"></canvas>
 <div class="painel" id="resultado">Os resultados aparecem aqui.</div>
 <div class="leg">
@@ -49,6 +51,7 @@ const tela=document.getElementById('tela'), ctx=tela.getContext('2d');
 const img=new Image(); let temImg=false;
 let pontos={}, modoPalpite=true, arrastando=null, registrado=false;
 const raio=document.getElementById('raio'), valR=document.getElementById('valR');
+const passo=document.getElementById('passo');
 const nomes={branca:'Toque no centro da bola BRANCA',alvo:'Toque no centro da bola ALVO',cacapa:'Toque no centro da CAÇAPA',palpite:'Toque onde você miraria (seu palpite)'};
 const R=()=>+raio.value;
 const ordem=()=>modoPalpite?['branca','alvo','cacapa','palpite']:['branca','alvo','cacapa'];
@@ -60,16 +63,33 @@ raio.oninput=()=>{valR.textContent=raio.value;atualizar();};
 function lerHist(){try{return JSON.parse(localStorage.getItem('treinoMira')||'[]')}catch(e){return[]}}
 function salvarHist(h){try{localStorage.setItem('treinoMira',JSON.stringify(h.slice(-200)))}catch(e){}}
 
-document.getElementById('arquivo').onchange=e=>{
-  const f=e.target.files[0]; if(!f) return;
+function carregarBlob(b){
   img.onload=()=>{
     tela.width=img.naturalWidth; tela.height=img.naturalHeight; temImg=true;
     raio.max=Math.round(img.naturalWidth/15);
     raio.value=Math.round(img.naturalWidth/90); valR.textContent=raio.value;
     limpar();
   };
-  img.src=URL.createObjectURL(f);
+  img.src=URL.createObjectURL(b);
+}
+document.getElementById('arquivo').onchange=e=>{const f=e.target.files[0]; if(f) carregarBlob(f);};
+document.getElementById('btnColar').onclick=async()=>{
+  try{
+    const itens=await navigator.clipboard.read();
+    for(const it of itens){
+      const tipo=it.types.find(t=>t.startsWith('image/'));
+      if(tipo){carregarBlob(await it.getType(tipo));return;}
+    }
+    passo.textContent='Nenhuma imagem copiada. Tire o print e use Copiar e Apagar.';
+  }catch(e){
+    passo.textContent='Toque em Colar na bolha do iOS para liberar, ou use Galeria.';
+  }
 };
+document.addEventListener('paste',e=>{
+  const f=[...((e.clipboardData&&e.clipboardData.files)||[])].find(x=>x.type.startsWith('image/'));
+  if(f) carregarBlob(f);
+});
+
 function limpar(){pontos={};registrado=false;atualizar();}
 document.getElementById('btnLimpar').onclick=limpar;
 document.getElementById('btnZerar').onclick=()=>{salvarHist([]);atualizar();};
@@ -172,7 +192,7 @@ function painel(){
 
 function atualizar(){
   const k=proximo();
-  document.getElementById('passo').textContent=!temImg?'Carregue um print para começar.':(k?nomes[k]:'Arraste qualquer ponto para ajustar. Recomeçar para nova tacada.');
+  passo.textContent=!temImg?'Cole ou carregue um print para começar.':(k?nomes[k]:'Arraste qualquer ponto para ajustar. Recomeçar para nova tacada.');
   desenhar(); painel();
 }
 atualizar();
