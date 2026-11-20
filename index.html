@@ -11,64 +11,54 @@
 :root{--petroleo:#0B3C49;--petroleo2:#072A33;--dourado:#B8975A;--claro:#F3EFE6}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--petroleo2);color:var(--claro);font-family:-apple-system,Helvetica,Arial,sans-serif;padding:calc(env(safe-area-inset-top) + 8px) 12px 24px}
-h1{font-size:19px;color:var(--dourado);margin:6px 0 4px}
-.sub{font-size:13px;opacity:.8;margin-bottom:12px}
+h1{font-size:19px;color:var(--dourado);margin:6px 0 10px}
 .barra{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 button,label.btn{background:var(--petroleo);color:var(--claro);border:1px solid var(--dourado);border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit}
 button.destaque{background:var(--dourado);color:var(--petroleo2);font-weight:600}
 input[type=file]{display:none}
 input[type=range]{width:100%;accent-color:var(--dourado)}
-#passo{font-size:14px;color:var(--dourado);margin:8px 0;min-height:20px}
+#passo{font-size:14px;color:var(--dourado);margin:6px 0;min-height:18px}
 canvas{width:100%;border-radius:8px;display:block;background:#0A1F26;touch-action:none}
-.painel{margin-top:10px;background:var(--petroleo);border-left:3px solid var(--dourado);border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.7}
+.painel{margin:0 0 10px;background:var(--petroleo);border-left:3px solid var(--dourado);border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.7}
 .painel b{color:var(--dourado)}
 .leg{font-size:12px;opacity:.85;margin-top:8px;line-height:1.6}
 </style>
 </head>
 <body>
 <h1>Treino de Mira</h1>
-<div class="sub">Print no modo prática, cole ou carregue aqui e marque as bolas.</div>
 <div class="barra">
   <button id="btnColar" class="destaque">Colar print</button>
   <label class="btn" for="arquivo">Galeria</label>
   <input type="file" id="arquivo" accept="image/*">
-  <button id="btnPalpite">Palpite: ligado</button>
-  <button id="btnLimpar">Recomeçar</button>
-  <button id="btnZerar">Zerar histórico</button>
+  <button id="btnProx">Próxima jogada</button>
+  <button id="btnBranca">Marcar branca</button>
 </div>
-<div style="font-size:13px">Tamanho da bola: <span id="valR"></span> px (ajuste até o círculo cobrir a bola branca)</div>
-<input type="range" id="raio" min="4" max="80" value="14">
-<div id="passo">Cole ou carregue um print para começar.</div>
+<div class="painel" id="resultado">Cole um print do modo prática para ver a jogada.</div>
+<div id="passo"></div>
 <canvas id="tela"></canvas>
-<div class="painel" id="resultado">Os resultados aparecem aqui.</div>
+<div style="font-size:13px;margin-top:10px">Tamanho da bola: <span id="valR"></span> px (ajuste fino se o círculo não cobrir a bola)</div>
+<input type="range" id="raio" min="4" max="80" value="14">
 <div class="leg">
-Dourado: linha de mira e bola fantasma. Verde água: caminho da bola alvo.
-Branco tracejado: saída da branca sem efeito (regra dos 90 graus). Coral: seu palpite.
+Dourado: linha de mira e bola fantasma. Verde água: caminho até a caçapa.
+Branco tracejado: saída da branca sem efeito. X coral: bola ignorada.
 </div>
 <script>
 const DOURADO='#B8975A', AGUA='#7FD1C7', CORAL='#E07A5F';
 const tela=document.getElementById('tela'), ctx=tela.getContext('2d');
-const img=new Image(); let temImg=false;
-let pontos={}, modoPalpite=true, arrastando=null, registrado=false;
+const img=new Image();
+let temImg=false, bolas=[], branca=null, cacapas=[], mesa=null, jogadas=[], idx=0, marcandoBranca=false;
 const raio=document.getElementById('raio'), valR=document.getElementById('valR');
-const passo=document.getElementById('passo');
-const nomes={branca:'Toque no centro da bola BRANCA',alvo:'Toque no centro da bola ALVO',cacapa:'Toque no centro da CAÇAPA',palpite:'Toque onde você miraria (seu palpite)'};
+const passo=document.getElementById('passo'), res=document.getElementById('resultado');
 const R=()=>+raio.value;
-const ordem=()=>modoPalpite?['branca','alvo','cacapa','palpite']:['branca','alvo','cacapa'];
-const proximo=()=>ordem().find(k=>!pontos[k]);
-const pronto=()=>ordem().every(k=>pontos[k]);
 valR.textContent=raio.value;
-raio.oninput=()=>{valR.textContent=raio.value;atualizar();};
-
-function lerHist(){try{return JSON.parse(localStorage.getItem('treinoMira')||'[]')}catch(e){return[]}}
-function salvarHist(h){try{localStorage.setItem('treinoMira',JSON.stringify(h.slice(-200)))}catch(e){}}
+raio.oninput=()=>{valR.textContent=raio.value;calcular();atualizar();};
 
 function carregarBlob(b){
   img.onload=()=>{
     tela.width=img.naturalWidth; tela.height=img.naturalHeight; temImg=true;
     raio.max=Math.round(img.naturalWidth/15);
-    raio.value=Math.round(img.naturalWidth/90); valR.textContent=raio.value;
-    limpar();
+    passo.textContent='Analisando a mesa...';
+    setTimeout(()=>{analisar();calcular();passo.textContent='';atualizar();},30);
   };
   img.src=URL.createObjectURL(b);
 }
@@ -81,65 +71,135 @@ document.getElementById('btnColar').onclick=async()=>{
       if(tipo){carregarBlob(await it.getType(tipo));return;}
     }
     passo.textContent='Nenhuma imagem copiada. Tire o print e use Copiar e Apagar.';
-  }catch(e){
-    passo.textContent='Toque em Colar na bolha do iOS para liberar, ou use Galeria.';
-  }
+  }catch(e){passo.textContent='Toque em Colar na bolha do iOS para liberar, ou use Galeria.';}
 };
 document.addEventListener('paste',e=>{
   const f=[...((e.clipboardData&&e.clipboardData.files)||[])].find(x=>x.type.startsWith('image/'));
   if(f) carregarBlob(f);
 });
+document.getElementById('btnProx').onclick=()=>{if(jogadas.length){idx=(idx+1)%jogadas.length;atualizar();}};
+document.getElementById('btnBranca').onclick=()=>{if(temImg){marcandoBranca=true;passo.textContent='Toque no centro da bola branca.';}};
 
-function limpar(){pontos={};registrado=false;atualizar();}
-document.getElementById('btnLimpar').onclick=limpar;
-document.getElementById('btnZerar').onclick=()=>{salvarHist([]);atualizar();};
-const btnP=document.getElementById('btnPalpite');
-btnP.onclick=()=>{modoPalpite=!modoPalpite;btnP.textContent='Palpite: '+(modoPalpite?'ligado':'desligado');limpar();};
+function nomeCor(c){
+  const[r,g,b]=c,mx=Math.max(r,g,b),mn=Math.min(r,g,b),s=mx?(mx-mn)/mx:0;
+  if(mx<70) return 'preta';
+  if(s<.22) return mx>170?'branca':'cinza';
+  const dd=mx-mn; let h;
+  if(mx===r) h=((g-b)/dd+6)%6; else if(mx===g) h=(b-r)/dd+2; else h=(r-g)/dd+4;
+  h*=60;
+  if(h<15||h>=340) return mx<140?'bordô':'vermelha';
+  if(h<40) return 'laranja';
+  if(h<70) return 'amarela';
+  if(h<170) return 'verde';
+  if(h<260) return 'azul';
+  return 'roxa';
+}
+
+function analisar(){
+  bolas=[]; branca=null; cacapas=[]; mesa=null; jogadas=[]; idx=0;
+  const W0=img.naturalWidth,H0=img.naturalHeight,S=900,k=S/W0,H=Math.max(1,Math.round(H0*k));
+  const cv=document.createElement('canvas'); cv.width=S; cv.height=H;
+  const cx=cv.getContext('2d'); cx.drawImage(img,0,0,S,H);
+  const d=cx.getImageData(0,0,S,H).data, N=S*H;
+  const am=[];
+  for(let y=Math.floor(H*.3);y<H*.7;y+=3)for(let x=Math.floor(S*.3);x<S*.7;x+=3){const i=(y*S+x)*4;am.push([d[i],d[i+1],d[i+2]]);}
+  const md=j=>{const v=am.map(a=>a[j]).sort((a,b)=>a-b);return v[v.length>>1];};
+  const pr=md(0),pg=md(1),pb=md(2),ps=pr+pg+pb+1,cr=pr/ps,cg=pg/ps;
+  const pano=new Uint8Array(N);
+  for(let p=0;p<N;p++){
+    const i=p*4,s=d[i]+d[i+1]+d[i+2]+1,br=s/ps;
+    pano[p]=(Math.abs(d[i]/s-cr)<.06&&Math.abs(d[i+1]/s-cg)<.06&&br>.45&&br<1.7)?1:0;
+  }
+  let y0=-1,y1=-1,x0=-1,x1=-1;
+  for(let y=0;y<H;y++){let c=0;for(let x=0;x<S;x++)c+=pano[y*S+x];if(c>S*.35){if(y0<0)y0=y;y1=y;}}
+  for(let x=0;x<S;x++){let c=0;for(let y=0;y<H;y++)c+=pano[y*S+x];if(c>H*.35){if(x0<0)x0=x;x1=x;}}
+  if(x0<0||y0<0||x1-x0<S*.3||y1-y0<H*.2) return;
+  mesa={x0:x0/k,y0:y0/k,x1:x1/k,y1:y1/k};
+  const X0=mesa.x0,X1=mesa.x1,Y0=mesa.y0,Y1=mesa.y1,XM=(X0+X1)/2;
+  cacapas=[
+    {x:X0,y:Y0,nome:'do canto superior esquerdo'},{x:XM,y:Y0,nome:'do meio superior',meio:true},{x:X1,y:Y0,nome:'do canto superior direito'},
+    {x:X0,y:Y1,nome:'do canto inferior esquerdo'},{x:XM,y:Y1,nome:'do meio inferior',meio:true},{x:X1,y:Y1,nome:'do canto inferior direito'}
+  ];
+  let m=new Uint8Array(N);
+  for(let y=y0+3;y<=y1-3;y++)for(let x=x0+3;x<=x1-3;x++){const p=y*S+x;m[p]=pano[p]?0:1;}
+  for(let it=0;it<2;it++){
+    const n=new Uint8Array(N);
+    for(let y=1;y<H-1;y++)for(let x=1;x<S-1;x++){const p=y*S+x;if(m[p]&&m[p-1]&&m[p+1]&&m[p-S]&&m[p+S])n[p]=1;}
+    m=n;
+  }
+  const vis=new Uint8Array(N), q=new Int32Array(N), comps=[];
+  for(let p=0;p<N;p++){
+    if(!m[p]||vis[p]) continue;
+    let h=0,t=0; q[t++]=p; vis[p]=1;
+    let a=0,sx=0,sy=0,mnx=1e9,mny=1e9,mxx=-1,mxy=-1,sr=0,sg=0,sb=0;
+    while(h<t){
+      const u=q[h++],ux=u%S,uy=(u/S)|0,i=u*4;
+      a++;sx+=ux;sy+=uy;sr+=d[i];sg+=d[i+1];sb+=d[i+2];
+      if(ux<mnx)mnx=ux;if(ux>mxx)mxx=ux;if(uy<mny)mny=uy;if(uy>mxy)mxy=uy;
+      const viz=[u-1,u+1,u-S,u+S];
+      for(const v of viz){if(v>=0&&v<N&&m[v]&&!vis[v]){vis[v]=1;q[t++]=v;}}
+    }
+    comps.push({a,x:sx/a,y:sy/a,w:mxx-mnx+1,h:mxy-mny+1,cor:[sr/a,sg/a,sb/a]});
+  }
+  const esp=(x1-x0)/38;
+  const cand=comps.filter(c=>{
+    const dm=(c.w+c.h)/2+4,ar=c.w/c.h,fill=c.a/(c.w*c.h);
+    return dm>esp*.55&&dm<esp*1.7&&ar>.65&&ar<1.5&&fill>.55;
+  });
+  if(!cand.length) return;
+  const dms=cand.map(c=>(c.w+c.h)/2+4).sort((a,b)=>a-b);
+  const rr=dms[dms.length>>1]/2/k;
+  raio.value=Math.max(4,Math.round(rr)); valR.textContent=raio.value;
+  let iB=0,melhor=-1e9;
+  cand.forEach((c,i)=>{const mx=Math.max(...c.cor),mn=Math.min(...c.cor),sc=(c.cor[0]+c.cor[1]+c.cor[2])/3-(mx-mn);if(sc>melhor){melhor=sc;iB=i;}});
+  cand.forEach((c,i)=>{
+    const o={x:c.x/k,y:c.y/k};
+    if(i===iB) branca=o; else bolas.push({x:o.x,y:o.y,nome:nomeCor(c.cor),excl:false});
+  });
+}
+
+function distSeg(P,A,B){
+  const vx=B.x-A.x,vy=B.y-A.y,L2=vx*vx+vy*vy||1;
+  let t=((P.x-A.x)*vx+(P.y-A.y)*vy)/L2; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(P.x-A.x-t*vx,P.y-A.y-t*vy);
+}
+function calcular(){
+  jogadas=[]; idx=0;
+  if(!branca||!mesa) return;
+  const r=R(), diag=Math.hypot(mesa.x1-mesa.x0,mesa.y1-mesa.y0), lim=Math.cos(80*Math.PI/180);
+  for(const b of bolas){
+    if(b.excl) continue;
+    for(const p of cacapas){
+      const ux=p.x-b.x,uy=p.y-b.y,L=Math.hypot(ux,uy); if(L<r) continue;
+      const nx=ux/L,ny=uy/L;
+      if(p.meio&&Math.abs(ny)<.64) continue;
+      const G={x:b.x-nx*2*r,y:b.y-ny*2*r};
+      const ax=G.x-branca.x,ay=G.y-branca.y,La=Math.hypot(ax,ay); if(La<r) continue;
+      const cs=(ax*nx+ay*ny)/La; if(cs<lim) continue;
+      let bloq=false;
+      for(const o of bolas){if(o===b)continue;if(distSeg(o,branca,G)<2*r*.95||distSeg(o,b,p)<2*r*.95){bloq=true;break;}}
+      if(bloq) continue;
+      jogadas.push({b,p,G,cs,La,L,dif:(La/diag+.1)*(L/diag+.1)/cs});
+    }
+  }
+  jogadas.sort((a,b)=>a.dif-b.dif);
+}
 
 function pos(e){const r=tela.getBoundingClientRect();return{x:(e.clientX-r.left)*tela.width/r.width,y:(e.clientY-r.top)*tela.height/r.height};}
 tela.addEventListener('pointerdown',e=>{
   if(!temImg) return;
-  const p=pos(e), k=proximo();
-  if(k){pontos[k]=p;arrastando=k;}
-  else{
-    let m=null,d=Infinity;
-    for(const c of ordem()){const q=pontos[c];const dd=Math.hypot(q.x-p.x,q.y-p.y);if(dd<d){d=dd;m=c;}}
-    if(d<R()*4){arrastando=m;pontos[m]=p;}
+  const p=pos(e), r=R();
+  if(marcandoBranca){
+    if(branca) bolas.push({x:branca.x,y:branca.y,nome:'detectada',excl:false});
+    bolas=bolas.filter(b=>Math.hypot(b.x-p.x,b.y-p.y)>r*1.5);
+    branca=p; marcandoBranca=false; passo.textContent='';
+    calcular(); atualizar(); return;
   }
-  tela.setPointerCapture(e.pointerId); atualizar();
+  if(branca&&Math.hypot(branca.x-p.x,branca.y-p.y)<r*1.5) return;
+  const b=bolas.find(b=>Math.hypot(b.x-p.x,b.y-p.y)<r*1.5);
+  if(b) b.excl=!b.excl; else bolas.push({x:p.x,y:p.y,nome:'marcada',excl:false});
+  calcular(); atualizar();
 });
-tela.addEventListener('pointermove',e=>{if(!arrastando)return;pontos[arrastando]=pos(e);atualizar();});
-tela.addEventListener('pointerup',()=>{
-  if(arrastando&&modoPalpite&&pronto()&&!registrado){
-    const c=calc(); if(c&&c.erro!==null){const h=lerHist();h.push(c.erro);salvarHist(h);registrado=true;atualizar();}
-  }
-  arrastando=null;
-});
-
-function calc(){
-  const W=pontos.branca,T=pontos.alvo,P=pontos.cacapa,A=pontos.palpite,r=R();
-  const ux=P.x-T.x,uy=P.y-T.y,L=Math.hypot(ux,uy); if(L<1) return null;
-  const nx=ux/L,ny=uy/L;
-  const G={x:T.x-nx*2*r,y:T.y-ny*2*r};
-  const ax=G.x-W.x,ay=G.y-W.y,La=Math.hypot(ax,ay); if(La<1) return null;
-  const mx=ax/La,my=ay/La;
-  let cs=Math.max(-1,Math.min(1,mx*nx+my*ny));
-  const corte=Math.acos(cs)*180/Math.PI;
-  let tx=mx-cs*nx,ty=my-cs*ny; const Lt=Math.hypot(tx,ty);
-  const tang=Lt>1e-6?{x:tx/Lt,y:ty/Lt}:null;
-  const esp=Math.max(0,1-Math.sin(corte*Math.PI/180));
-  let erro=null,lado='',desloc=0;
-  if(A){
-    const px=A.x-W.x,py=A.y-W.y,Lp=Math.hypot(px,py);
-    if(Lp>1){
-      const dx=px/Lp,dy=py/Lp;
-      erro=Math.acos(Math.max(-1,Math.min(1,dx*mx+dy*my)))*180/Math.PI;
-      lado=(dx*my-dy*mx)>0?'à esquerda':'à direita';
-      desloc=La*Math.sin(erro*Math.PI/180)/(2*r);
-    }
-  }
-  return{G,corte,tang,esp,erro,lado,desloc,La};
-}
 
 function circulo(p,r,cor,lw,fill){ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);if(fill){ctx.fillStyle=fill;ctx.fill();}ctx.lineWidth=lw;ctx.strokeStyle=cor;ctx.stroke();}
 function linha(a,b,cor,lw,tr){ctx.beginPath();ctx.setLineDash(tr||[]);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineWidth=lw;ctx.strokeStyle=cor;ctx.stroke();ctx.setLineDash([]);}
@@ -147,53 +207,40 @@ function linha(a,b,cor,lw,tr){ctx.beginPath();ctx.setLineDash(tr||[]);ctx.moveTo
 function desenhar(){
   if(!temImg){tela.width=600;tela.height=300;return;}
   ctx.drawImage(img,0,0);
-  const r=R(),lw=Math.max(2,r/5),W=pontos.branca,T=pontos.alvo,P=pontos.cacapa,A=pontos.palpite;
-  if(W) circulo(W,r,'#FFFFFF',lw);
-  if(T) circulo(T,r,DOURADO,lw);
-  if(P) circulo(P,r*1.3,AGUA,lw);
-  if(!pronto()){if(A&&W)linha(W,A,CORAL,lw);return;}
-  const c=calc(); if(!c) return;
-  if(A){const k=c.La/Math.max(1,Math.hypot(A.x-W.x,A.y-W.y));linha(W,{x:W.x+(A.x-W.x)*k,y:W.y+(A.y-W.y)*k},CORAL,lw,[lw*2,lw*2]);circulo(A,r/3,CORAL,lw,CORAL);}
-  linha(W,c.G,DOURADO,lw);
-  circulo(c.G,r,DOURADO,lw,'rgba(184,151,90,0.25)');
-  linha(T,P,AGUA,lw,[lw*3,lw*2]);
-  if(c.tang&&c.corte<89) linha(c.G,{x:c.G.x+c.tang.x*r*12,y:c.G.y+c.tang.y*r*12},'#FFFFFF',lw*0.8,[lw*2,lw*2]);
+  const r=R(), lw=Math.max(2,r/5);
+  for(const p of cacapas) circulo(p,r*.6,AGUA,lw);
+  for(const b of bolas){
+    circulo(b,r,b.excl?'rgba(255,255,255,.35)':DOURADO,lw*.7);
+    if(b.excl){const s=r*.7;linha({x:b.x-s,y:b.y-s},{x:b.x+s,y:b.y+s},CORAL,lw);linha({x:b.x+s,y:b.y-s},{x:b.x-s,y:b.y+s},CORAL,lw);}
+  }
+  if(branca) circulo(branca,r,'#FFFFFF',lw);
+  const j=jogadas[idx]; if(!j||!branca) return;
+  linha(branca,j.G,DOURADO,lw);
+  circulo(j.G,r,DOURADO,lw,'rgba(184,151,90,.3)');
+  linha(j.b,j.p,AGUA,lw,[lw*3,lw*2]);
+  const nx=(j.p.x-j.b.x)/j.L, ny=(j.p.y-j.b.y)/j.L;
+  const ax=(j.G.x-branca.x)/j.La, ay=(j.G.y-branca.y)/j.La;
+  let tx=ax-j.cs*nx, ty=ay-j.cs*ny; const Lt=Math.hypot(tx,ty);
+  if(Lt>1e-3) linha(j.G,{x:j.G.x+tx/Lt*r*12,y:j.G.y+ty/Lt*r*12},'#FFFFFF',lw*.8,[lw*2,lw*2]);
 }
 
 function rotuloEsp(e){
   const ref=[[1,'cheia'],[0.75,'3/4 de bola'],[0.5,'meia bola'],[0.25,'1/4 de bola'],[0.125,'muito fina']];
-  let m=ref[0];for(const x of ref)if(Math.abs(x[0]-e)<Math.abs(m[0]-e))m=x;return m[1];
-}
-function nota(e){return e<1?'Excelente':e<2.5?'Boa':e<5?'Aceitável':'Ruim, revise a leitura';}
-
-function painel(){
-  const el=document.getElementById('resultado'), h=lerHist();
-  const media=h.length?(h.slice(-20).reduce((a,b)=>a+b,0)/Math.min(20,h.length)).toFixed(2):null;
-  let t='';
-  if(temImg&&pronto()){
-    const c=calc();
-    if(c){
-      t+='<b>Ângulo de corte:</b> '+c.corte.toFixed(1)+'°<br>';
-      if(c.corte>=90) t+='<b>Atenção:</b> tacada direta inviável, procure tabela ou outra bola.<br>';
-      else{
-        t+='<b>Espessura:</b> '+Math.round(c.esp*100)+'% ('+rotuloEsp(c.esp)+')<br>';
-        if(c.corte>75) t+='<b>Risco:</b> corte muito fino, margem de erro mínima.<br>';
-      }
-      if(c.erro!==null){
-        t+='<b>Seu erro:</b> '+c.erro.toFixed(2)+'°, palpite '+c.lado+' do ponto certo<br>';
-        t+='<b>Deslocamento:</b> cerca de '+c.desloc.toFixed(2)+' bola(s) no ponto de contato<br>';
-        t+='<b>Nota:</b> '+nota(c.erro)+'<br>';
-      }
-    }
-  } else t+='Marque os pontos na imagem.<br>';
-  t+=media!==null?'<b>Erro médio (últimas 20):</b> '+media+'° em '+h.length+' tacada(s) registradas':'<b>Histórico:</b> nenhuma tacada registrada ainda';
-  el.innerHTML=t;
+  let m=ref[0]; for(const x of ref) if(Math.abs(x[0]-e)<Math.abs(m[0]-e)) m=x; return m[1];
 }
 
 function atualizar(){
-  const k=proximo();
-  passo.textContent=!temImg?'Cole ou carregue um print para começar.':(k?nomes[k]:'Arraste qualquer ponto para ajustar. Recomeçar para nova tacada.');
-  desenhar(); painel();
+  desenhar();
+  if(!temImg){res.innerHTML='Cole um print do modo prática para ver a jogada.';return;}
+  if(!mesa){res.innerHTML='Mesa não reconhecida neste print. Use um print com a mesa inteira visível e me envie para calibrar.';return;}
+  if(!branca){res.innerHTML='Bola branca não identificada. Toque em <b>Marcar branca</b> e depois nela.';return;}
+  if(!jogadas.length){res.innerHTML='Nenhuma tacada direta livre. Pense em tabela ou jogada de segurança.<br><span style="opacity:.8">'+bolas.length+' bolas reconhecidas.</span>';return;}
+  const j=jogadas[idx], ang=Math.acos(j.cs)*180/Math.PI, e=1-Math.sin(ang*Math.PI/180);
+  const nivel=j.dif<.08?'fácil':j.dif<.2?'média':'difícil';
+  res.innerHTML='<b>Jogada '+(idx+1)+' de '+jogadas.length+':</b> bola '+j.b.nome+' na caçapa '+j.p.nome+
+    '<br><b>Corte:</b> '+ang.toFixed(1)+'° | <b>Espessura:</b> '+Math.round(e*100)+'% ('+rotuloEsp(e)+')'+
+    '<br><b>Dificuldade:</b> '+nivel+
+    '<br><span style="opacity:.8">'+bolas.length+' bolas reconhecidas. Toque numa bola para ignorar, ou num ponto vazio para adicionar.</span>';
 }
 atualizar();
 </script>
