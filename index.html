@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Treino Mira">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Treino de Mira</title>
+<style>
+:root{--petroleo:#0B3C49;--petroleo2:#072A33;--dourado:#B8975A;--claro:#F3EFE6}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--petroleo2);color:var(--claro);font-family:-apple-system,Helvetica,Arial,sans-serif;padding:calc(env(safe-area-inset-top) + 8px) 12px 24px}
+h1{font-size:19px;color:var(--dourado);margin:6px 0 4px}
+.sub{font-size:13px;opacity:.8;margin-bottom:12px}
+.barra{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+button,label.btn{background:var(--petroleo);color:var(--claro);border:1px solid var(--dourado);border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit}
+input[type=file]{display:none}
+input[type=range]{width:100%;accent-color:var(--dourado)}
+#passo{font-size:14px;color:var(--dourado);margin:8px 0;min-height:20px}
+canvas{width:100%;border-radius:8px;display:block;background:#0A1F26;touch-action:none}
+.painel{margin-top:10px;background:var(--petroleo);border-left:3px solid var(--dourado);border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.7}
+.painel b{color:var(--dourado)}
+.leg{font-size:12px;opacity:.85;margin-top:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<h1>Treino de Mira</h1>
+<div class="sub">Print no modo prática, carregue aqui e marque as bolas.</div>
+<div class="barra">
+  <label class="btn" for="arquivo">Carregar print</label>
+  <input type="file" id="arquivo" accept="image/*">
+  <button id="btnPalpite">Palpite: ligado</button>
+  <button id="btnLimpar">Recomeçar</button>
+  <button id="btnZerar">Zerar histórico</button>
+</div>
+<div style="font-size:13px">Tamanho da bola: <span id="valR"></span> px (ajuste até o círculo cobrir a bola branca)</div>
+<input type="range" id="raio" min="4" max="80" value="14">
+<div id="passo">Carregue um print para começar.</div>
+<canvas id="tela"></canvas>
+<div class="painel" id="resultado">Os resultados aparecem aqui.</div>
+<div class="leg">
+Dourado: linha de mira e bola fantasma. Verde água: caminho da bola alvo.
+Branco tracejado: saída da branca sem efeito (regra dos 90 graus). Coral: seu palpite.
+</div>
+<script>
+const DOURADO='#B8975A', AGUA='#7FD1C7', CORAL='#E07A5F';
+const tela=document.getElementById('tela'), ctx=tela.getContext('2d');
+const img=new Image(); let temImg=false;
+let pontos={}, modoPalpite=true, arrastando=null, registrado=false;
+const raio=document.getElementById('raio'), valR=document.getElementById('valR');
+const nomes={branca:'Toque no centro da bola BRANCA',alvo:'Toque no centro da bola ALVO',cacapa:'Toque no centro da CAÇAPA',palpite:'Toque onde você miraria (seu palpite)'};
+const R=()=>+raio.value;
+const ordem=()=>modoPalpite?['branca','alvo','cacapa','palpite']:['branca','alvo','cacapa'];
+const proximo=()=>ordem().find(k=>!pontos[k]);
+const pronto=()=>ordem().every(k=>pontos[k]);
+valR.textContent=raio.value;
+raio.oninput=()=>{valR.textContent=raio.value;atualizar();};
+
+function lerHist(){try{return JSON.parse(localStorage.getItem('treinoMira')||'[]')}catch(e){return[]}}
+function salvarHist(h){try{localStorage.setItem('treinoMira',JSON.stringify(h.slice(-200)))}catch(e){}}
+
+document.getElementById('arquivo').onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  img.onload=()=>{
+    tela.width=img.naturalWidth; tela.height=img.naturalHeight; temImg=true;
+    raio.max=Math.round(img.naturalWidth/15);
+    raio.value=Math.round(img.naturalWidth/90); valR.textContent=raio.value;
+    limpar();
+  };
+  img.src=URL.createObjectURL(f);
+};
+function limpar(){pontos={};registrado=false;atualizar();}
+document.getElementById('btnLimpar').onclick=limpar;
+document.getElementById('btnZerar').onclick=()=>{salvarHist([]);atualizar();};
+const btnP=document.getElementById('btnPalpite');
+btnP.onclick=()=>{modoPalpite=!modoPalpite;btnP.textContent='Palpite: '+(modoPalpite?'ligado':'desligado');limpar();};
+
+function pos(e){const r=tela.getBoundingClientRect();return{x:(e.clientX-r.left)*tela.width/r.width,y:(e.clientY-r.top)*tela.height/r.height};}
+tela.addEventListener('pointerdown',e=>{
+  if(!temImg) return;
+  const p=pos(e), k=proximo();
+  if(k){pontos[k]=p;arrastando=k;}
+  else{
+    let m=null,d=Infinity;
+    for(const c of ordem()){const q=pontos[c];const dd=Math.hypot(q.x-p.x,q.y-p.y);if(dd<d){d=dd;m=c;}}
+    if(d<R()*4){arrastando=m;pontos[m]=p;}
+  }
+  tela.setPointerCapture(e.pointerId); atualizar();
+});
+tela.addEventListener('pointermove',e=>{if(!arrastando)return;pontos[arrastando]=pos(e);atualizar();});
+tela.addEventListener('pointerup',()=>{
+  if(arrastando&&modoPalpite&&pronto()&&!registrado){
+    const c=calc(); if(c&&c.erro!==null){const h=lerHist();h.push(c.erro);salvarHist(h);registrado=true;atualizar();}
+  }
+  arrastando=null;
+});
+
+function calc(){
+  const W=pontos.branca,T=pontos.alvo,P=pontos.cacapa,A=pontos.palpite,r=R();
+  const ux=P.x-T.x,uy=P.y-T.y,L=Math.hypot(ux,uy); if(L<1) return null;
+  const nx=ux/L,ny=uy/L;
+  const G={x:T.x-nx*2*r,y:T.y-ny*2*r};
+  const ax=G.x-W.x,ay=G.y-W.y,La=Math.hypot(ax,ay); if(La<1) return null;
+  const mx=ax/La,my=ay/La;
+  let cs=Math.max(-1,Math.min(1,mx*nx+my*ny));
+  const corte=Math.acos(cs)*180/Math.PI;
+  let tx=mx-cs*nx,ty=my-cs*ny; const Lt=Math.hypot(tx,ty);
+  const tang=Lt>1e-6?{x:tx/Lt,y:ty/Lt}:null;
+  const esp=Math.max(0,1-Math.sin(corte*Math.PI/180));
+  let erro=null,lado='',desloc=0;
+  if(A){
+    const px=A.x-W.x,py=A.y-W.y,Lp=Math.hypot(px,py);
+    if(Lp>1){
+      const dx=px/Lp,dy=py/Lp;
+      erro=Math.acos(Math.max(-1,Math.min(1,dx*mx+dy*my)))*180/Math.PI;
+      lado=(dx*my-dy*mx)>0?'à esquerda':'à direita';
+      desloc=La*Math.sin(erro*Math.PI/180)/(2*r);
+    }
+  }
+  return{G,corte,tang,esp,erro,lado,desloc,La};
+}
+
+function circulo(p,r,cor,lw,fill){ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);if(fill){ctx.fillStyle=fill;ctx.fill();}ctx.lineWidth=lw;ctx.strokeStyle=cor;ctx.stroke();}
+function linha(a,b,cor,lw,tr){ctx.beginPath();ctx.setLineDash(tr||[]);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineWidth=lw;ctx.strokeStyle=cor;ctx.stroke();ctx.setLineDash([]);}
+
+function desenhar(){
+  if(!temImg){tela.width=600;tela.height=300;return;}
+  ctx.drawImage(img,0,0);
+  const r=R(),lw=Math.max(2,r/5),W=pontos.branca,T=pontos.alvo,P=pontos.cacapa,A=pontos.palpite;
+  if(W) circulo(W,r,'#FFFFFF',lw);
+  if(T) circulo(T,r,DOURADO,lw);
+  if(P) circulo(P,r*1.3,AGUA,lw);
+  if(!pronto()){if(A&&W)linha(W,A,CORAL,lw);return;}
+  const c=calc(); if(!c) return;
+  if(A){const k=c.La/Math.max(1,Math.hypot(A.x-W.x,A.y-W.y));linha(W,{x:W.x+(A.x-W.x)*k,y:W.y+(A.y-W.y)*k},CORAL,lw,[lw*2,lw*2]);circulo(A,r/3,CORAL,lw,CORAL);}
+  linha(W,c.G,DOURADO,lw);
+  circulo(c.G,r,DOURADO,lw,'rgba(184,151,90,0.25)');
+  linha(T,P,AGUA,lw,[lw*3,lw*2]);
+  if(c.tang&&c.corte<89) linha(c.G,{x:c.G.x+c.tang.x*r*12,y:c.G.y+c.tang.y*r*12},'#FFFFFF',lw*0.8,[lw*2,lw*2]);
+}
+
+function rotuloEsp(e){
+  const ref=[[1,'cheia'],[0.75,'3/4 de bola'],[0.5,'meia bola'],[0.25,'1/4 de bola'],[0.125,'muito fina']];
+  let m=ref[0];for(const x of ref)if(Math.abs(x[0]-e)<Math.abs(m[0]-e))m=x;return m[1];
+}
+function nota(e){return e<1?'Excelente':e<2.5?'Boa':e<5?'Aceitável':'Ruim, revise a leitura';}
+
+function painel(){
+  const el=document.getElementById('resultado'), h=lerHist();
+  const media=h.length?(h.slice(-20).reduce((a,b)=>a+b,0)/Math.min(20,h.length)).toFixed(2):null;
+  let t='';
+  if(temImg&&pronto()){
+    const c=calc();
+    if(c){
+      t+='<b>Ângulo de corte:</b> '+c.corte.toFixed(1)+'°<br>';
+      if(c.corte>=90) t+='<b>Atenção:</b> tacada direta inviável, procure tabela ou outra bola.<br>';
+      else{
+        t+='<b>Espessura:</b> '+Math.round(c.esp*100)+'% ('+rotuloEsp(c.esp)+')<br>';
+        if(c.corte>75) t+='<b>Risco:</b> corte muito fino, margem de erro mínima.<br>';
+      }
+      if(c.erro!==null){
+        t+='<b>Seu erro:</b> '+c.erro.toFixed(2)+'°, palpite '+c.lado+' do ponto certo<br>';
+        t+='<b>Deslocamento:</b> cerca de '+c.desloc.toFixed(2)+' bola(s) no ponto de contato<br>';
+        t+='<b>Nota:</b> '+nota(c.erro)+'<br>';
+      }
+    }
+  } else t+='Marque os pontos na imagem.<br>';
+  t+=media!==null?'<b>Erro médio (últimas 20):</b> '+media+'° em '+h.length+' tacada(s) registradas':'<b>Histórico:</b> nenhuma tacada registrada ainda';
+  el.innerHTML=t;
+}
+
+function atualizar(){
+  const k=proximo();
+  document.getElementById('passo').textContent=!temImg?'Carregue um print para começar.':(k?nomes[k]:'Arraste qualquer ponto para ajustar. Recomeçar para nova tacada.');
+  desenhar(); painel();
+}
+atualizar();
+</script>
+</body>
+</html>
